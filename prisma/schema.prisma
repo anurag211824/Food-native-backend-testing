@@ -1,0 +1,254 @@
+// 1. CONFIGURATION
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 2. ENUMS (The Rules)
+enum Role {
+  CUSTOMER
+  ADMIN
+  RESTAURANT_MANAGER
+  DELIVERY_PARTNER
+  SUPPORT_AGENT
+}
+
+enum OrderStatus {
+  PLACED          // Customer paid, waiting for acceptance [cite: 202]
+  ACCEPTED        // Restaurant accepted [cite: 202]
+  PREPARING       // Kitchen is cooking [cite: 202]
+  READY           // Food is ready for pickup [cite: 203]
+  PICKED_UP       // Driver has the food [cite: 204]
+  ON_THE_WAY      // Driver is moving [cite: 204]
+  DELIVERED       // Handed over to customer [cite: 206]
+  CANCELLED       // Cancelled by user/restaurant
+  REFUSED         // Customer refused delivery
+}
+
+enum DriverStatus {
+  OFFLINE
+  ONLINE          // Available for orders [cite: 659]
+  BUSY            // Currently delivering
+}
+
+enum VegType {
+  VEG
+  NON_VEG
+  VEGAN
+  EGG
+}
+
+// 3. USER MANAGEMENT (Customers & Staff)
+model User {
+  id              Int       @id @default(autoincrement())
+  phone           String    @unique // Login via OTP [cite: 41]
+  email           String?   @unique
+  name            String?
+  password        String?   // Nullable if using OTP only
+  role            Role      @default(CUSTOMER)
+  
+  // Profile [cite: 52-56]
+  profilePic      String?   // [cite: 54]
+  dob             DateTime? // [cite: 55]
+  gender          String?   // [cite: 55]
+  isVeg           Boolean   @default(false) // Preference [cite: 57]
+  language        String?    @default("en")  // [cite: 59]
+  
+  // Relations
+  addresses       Address[]
+  orders          Order[]
+  reviews         Review[]
+  wallet          Wallet?   // One-to-One
+  
+  // Staff/Partner Roles
+  restaurant      Restaurant? // If this user is a manager
+  driverProfile   DriverProfile? // If this user is a rider
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Address {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id])
+  type        String   @default("HOME") // Home/Work/Other [cite: 63]
+  addressLine String
+  landmark    String?  // [cite: 64]
+  lat         Float    // GPS Detect [cite: 63]
+  lng         Float
+  isDefault   Boolean  @default(false) // [cite: 67]
+}
+
+// 4. RESTAURANT ENGINE
+model Restaurant {
+  id              Int       @id @default(autoincrement())
+  managerId       Int       @unique
+  manager         User      @relation(fields: [managerId], references: [id])
+  
+  // Basic Info [cite: 357-366]
+  name            String
+  image           String?   // Cover image [cite: 368]
+  costForTwo      Int       // [cite: 365]
+  cuisineTypes    String[]  // ["North Indian", "Chinese"] [cite: 117]
+  lat             Float     // GPS Pin [cite: 366]
+  lng             Float
+  address         String
+  isActive        Boolean   @default(true) // Temporary Closure toggle [cite: 372]
+  isOpen          Boolean   @default(true) // Daily Open/Close
+  
+  // Documents [cite: 360]
+  fssaiCode       String?
+  gstNumber       String?
+  
+  // Relations
+  menuCategories  MenuCategory[]
+  orders          Order[]
+  reviews         Review[]
+}
+
+model MenuCategory {
+  id           Int        @id @default(autoincrement())
+  name         String     // "Starters", "Main Course" [cite: 406]
+  restaurantId Int
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  items        MenuItem[]
+}
+
+model MenuItem {
+  id           Int          @id @default(autoincrement())
+  categoryId   Int
+  category     MenuCategory @relation(fields: [categoryId], references: [id])
+  
+  name         String       // [cite: 399]
+  description  String?      // [cite: 399]
+  price        Float        // [cite: 399]
+  image        String?      // [cite: 400]
+  type         VegType      // Veg/Non-veg icon [cite: 135]
+  isAvailable  Boolean      @default(true) // Out of stock toggle [cite: 412]
+  isBestseller Boolean      @default(false) // Tag [cite: 135]
+  
+  // Advanced Features
+  spiceLevel   String?      // "Medium", "High" [cite: 399]
+  prepTime     Int?         // In minutes [cite: 399]
+}
+
+// 5. DELIVERY PARTNER (Rider)
+model DriverProfile {
+  id              Int          @id @default(autoincrement())
+  userId          Int          @unique
+  user            User         @relation(fields: [userId], references: [id])
+  
+  // Status [cite: 659]
+  status          DriverStatus @default(OFFLINE)
+  currentLat      Float?       // Live Location [cite: 211]
+  currentLng      Float?
+  
+  // Vehicle & Docs [cite: 649, 652]
+  vehicleType     String       // "Bike", "Cycle"
+  licenseNumber   String
+  vehiclePlate    String
+  
+  // Performance [cite: 878]
+  rating          Float        @default(5.0)
+  totalDeliveries Int          @default(0)
+  
+  orders          Order[]
+}
+
+// 6. THE ORDER ENGINE (The Core)
+model Order {
+  id              Int         @id @default(autoincrement())
+  
+  // Participants
+  userId          Int
+  user            User        @relation(fields: [userId], references: [id])
+  restaurantId    Int
+  restaurant      Restaurant  @relation(fields: [restaurantId], references: [id])
+  driverId        Int?
+  driver          DriverProfile? @relation(fields: [driverId], references: [id])
+  
+  // Status Flow [cite: 201]
+  status          OrderStatus @default(PLACED)
+  otp             String?     // Delivery OTP [cite: 220]
+  
+  // Order Content (JSONB Optimization)
+  // Stores snapshot of items, prices, and addons at time of order [cite: 444]
+  // Format: [{ "name": "Momos", "price": 100, "addons": ["Cheese"] }]
+  itemsSnapshot   Json        
+  
+  // Money Matters [cite: 171]
+  totalAmount     Float
+  itemTotal       Float
+  tax             Float
+  deliveryCharge  Float
+  platformFee     Float
+  driverTip       Float       @default(0)
+  
+  // Split Payments 
+  paidByWallet    Float       @default(0) 
+  paidByGateway   Float       @default(0) 
+  paymentMode     String      // "UPI", "COD", "SPLIT"
+  
+  // Timestamps [cite: 208]
+  placedAt        DateTime    @default(now())
+  acceptedAt      DateTime?
+  pickedUpAt      DateTime?
+  deliveredAt     DateTime?
+  
+  // Disputes
+  refunds         Refund[]
+  review          Review?
+}
+
+// 7. FINANCIALS (Wallet & Refunds)
+model Wallet {
+  id          Int     @id @default(autoincrement())
+  userId      Int     @unique
+  user        User    @relation(fields: [userId], references: [id])
+  balance     Float   @default(0) // [cite: 80]
+  
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id        Int      @id @default(autoincrement())
+  walletId  Int
+  wallet    Wallet   @relation(fields: [walletId], references: [id])
+  amount    Float    // Positive for Credit, Negative for Debit
+  type      String   // "REFUND", "TOPUP", "ORDER_PAYMENT"
+  createdAt DateTime @default(now())
+}
+
+model Refund {
+  id          Int      @id @default(autoincrement())
+  orderId     Int
+  order       Order    @relation(fields: [orderId], references: [id])
+  amount      Float
+  reason      String   // "Spilled food", "Missing item"
+  status      String   // "PENDING", "APPROVED", "REJECTED"
+  isAuto      Boolean  @default(false) // Auto-refund logic [cite: 83]
+}
+
+// 8. REVIEWS & RATINGS [cite: 233]
+model Review {
+  id            Int      @id @default(autoincrement())
+  orderId       Int      @unique
+  order         Order    @relation(fields: [orderId], references: [id])
+  
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id])
+  
+  restaurantId  Int
+  restaurant    Restaurant @relation(fields: [restaurantId], references: [id])
+  
+  // Separate Ratings [cite: 234, 236]
+  foodRating    Int      // 1-5 Stars
+  deliveryRating Int     // 1-5 Stars
+  comment       String?  // Text review [cite: 243]
+  
+  createdAt     DateTime @default(now())
+}
