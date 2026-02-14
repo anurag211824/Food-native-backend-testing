@@ -32,6 +32,7 @@ export async function register(req: Request, res: Response) {
   res.status(201).json({
     message: "User registered successfully",
     user: safeUser,
+    token
   });
 }
 
@@ -59,6 +60,7 @@ export async function login(req: Request, res: Response) {
   res.status(201).json({
     message: "User loggedIn successfully",
     user: safeUser,
+    token
   });
 }
 
