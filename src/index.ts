@@ -7,7 +7,10 @@ import cookieParser from "cookie-parser";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-app.use(cors({ origin: '*' }));
+app.use(cors({
+  origin: true,
+  credentials: true,
+}));
 app.use(cookieParser());
 app.use(express.json());
 
