@@ -1,8 +1,11 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../lib/db.js';
+import { AuthedRequest } from '../middleware/auth.js';
 
-export async function createOrder(req: Request, res: Response) {
+export async function createOrder( req: AuthedRequest, res: Response) {
   const { userId, restaurantId, driverId, itemsSnapshot, paymentMode } = req.body;
+  console.log(userId,restaurantId,driverId,itemsSnapshot,paymentMode);
+  
   if (!userId || !restaurantId || !itemsSnapshot) return res.status(400).json({ error: 'missing fields' });
 
   const itemTotal = (itemsSnapshot as any[]).reduce(
